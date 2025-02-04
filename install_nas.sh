@@ -2,19 +2,19 @@
 
 # Обновление системы
 echo "Обновление системы..."
-apt update && apt upgrade -y
+sudo apt update && apt upgrade -y
 
 # Установка Xfce (графический интерфейс)
 echo "Установка Xfce..."
-apt install -y xfce4 xfce4-goodies lightdm
+sudo apt install -y xfce4 xfce4-goodies lightdm
 
 # Установка Samba для сетевого доступа
 echo "Установка Samba..."
-apt install -y samba samba-common-bin
+sudo apt install -y samba samba-common-bin
 
 # Создание общей папки NAS
-mkdir -p /srv/nas
-chmod 777 /srv/nas
+sudo mkdir -p /srv/nas
+sudo chmod 777 /srv/nas
 
 # Настройка Samba
 cat <<EOF > /etc/samba/smb.conf
