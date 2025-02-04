@@ -1,14 +1,9 @@
 #!/bin/bash
 
-# Обновление системы
 echo "Обновление системы..."
-sudo apt update && apt upgrade -y
+sudo apt update && sudo apt upgrade -y
 
-# Установка Xfce (графический интерфейс)
-echo "Установка Xfce..."
-sudo apt install -y xfce4 xfce4-goodies lightdm
-
-# Установка Samba для сетевого доступа
+# === УСТАНОВКА SAMBA ===
 echo "Установка Samba..."
 sudo apt install -y samba samba-common-bin
 
@@ -17,7 +12,7 @@ sudo mkdir -p /srv/nas
 sudo chmod 777 /srv/nas
 
 # Настройка Samba
-cat <<EOF > /etc/samba/smb.conf
+sudo tee /etc/samba/smb.conf > /dev/null <<EOF
 [global]
    workgroup = WORKGROUP
    security = user
@@ -30,19 +25,19 @@ cat <<EOF > /etc/samba/smb.conf
    guest ok = yes
 EOF
 
-# Перезапуск Samba
-systemctl restart smbd
+sudo systemctl restart smbd
 
-# Установка Syncthing
+# === УСТАНОВКА SYNCTHING ===
 echo "Установка Syncthing..."
-apt install -y syncthing
+sudo apt install -y syncthing
 
-# Добавление Syncthing в автозапуск
-useradd -m -s /bin/bash syncthing
-mkdir -p /home/syncthing/.config/syncthing
-chown -R syncthing:syncthing /home/syncthing
+# Создание пользователя для Syncthing
+sudo useradd -m -s /bin/bash syncthing
+sudo mkdir -p /home/syncthing/.config/syncthing
+sudo chown -R syncthing:syncthing /home/syncthing
 
-cat <<EOF > /etc/systemd/system/syncthing.service
+# Создание systemd-юнита для Syncthing
+sudo tee /etc/systemd/system/syncthing.service > /dev/null <<EOF
 [Unit]
 Description=Syncthing - Open Source Continuous File Synchronization
 After=network.target
@@ -58,22 +53,81 @@ RestartForceExitStatus=3 4
 WantedBy=default.target
 EOF
 
-# Запуск Syncthing
-systemctl daemon-reload
-systemctl enable syncthing
-systemctl start syncthing
+sudo systemctl enable syncthing
 
-# Установка Cockpit
+# === УСТАНОВКА COCKPIT ===
 echo "Установка Cockpit..."
-apt install -y cockpit cockpit-system cockpit-networkmanager
+sudo apt install -y cockpit cockpit-system cockpit-networkmanager
+sudo systemctl enable cockpit.socket
 
-# Запуск Cockpit
-systemctl enable --now cockpit.socket
+# === УСТАНОВКА QBITTORRENT ===
+echo "Установка qBittorrent..."
+sudo apt install -y qbittorrent-nox
 
-# Вывод информации
-echo "=========================="
-echo "Установка завершена!"
-echo "Админ-панель Cockpit: http://$(hostname -I | awk '{print $1}'):9090"
-echo "Настроенный общий доступ к папке /srv/nas через Samba."
-echo "Syncthing запущен для синхронизации файлов."
-echo "=========================="
+# Создание пользователя для работы qBittorrent
+sudo useradd -m -s /bin/bash qbittorrent
+sudo mkdir -p /home/qbittorrent/downloads
+sudo chown -R qbittorrent:qbittorrent /home/qbittorrent
+
+# Создание systemd-юнита для qBittorrent
+sudo tee /etc/systemd/system/qbittorrent.service > /dev/null <<EOF
+[Unit]
+Description=qBittorrent Daemon
+After=network.target
+
+[Service]
+User=qbittorrent
+ExecStart=/usr/bin/qbittorrent-nox --webui-port=8080
+Restart=on-failure
+SuccessExitStatus=0
+
+[Install]
+WantedBy=default.target
+EOF
+
+sudo systemctl enable qbittorrent
+
+# === УСТАНОВКА WIREGUARD VPN ===
+echo "Установка WireGuard..."
+sudo apt install -y wireguard
+
+# Генерация ключей WireGuard
+sudo mkdir -p /etc/wireguard
+sudo wg genkey | sudo tee /etc/wireguard/privatekey | sudo wg pubkey > /etc/wireguard/publickey
+sudo chmod 600 /etc/wireguard/privatekey
+
+# Создание конфигурации сервера WireGuard
+sudo tee /etc/wireguard/wg0.conf > /dev/null <<EOF
+[Interface]
+Address = 10.0.0.1/24
+ListenPort = 51820
+PrivateKey = $(sudo cat /etc/wireguard/privatekey)
+SaveConfig = true
+PostUp = sudo iptables -A FORWARD -i wg0 -j ACCEPT; sudo iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+PostDown = sudo iptables -D FORWARD -i wg0 -j ACCEPT; sudo iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE
+
+[Peer]
+# Добавь сюда ключ клиента вручную после установки
+PublicKey = КЛЮЧ_КЛИЕНТА
+AllowedIPs = 10.0.0.2/32
+EOF
+
+# Включение WireGuard
+sudo systemctl enable wg-quick@wg0
+
+# === ОТКРЫТИЕ ПОРТОВ ДЛЯ ДОСТУПА ИЗВНЕ ===
+echo "Настройка брандмауэра..."
+sudo ufw allow 51820/udp   # WireGuard VPN
+sudo ufw allow 445/tcp     # Samba
+sudo ufw allow 22000/tcp   # Syncthing
+sudo ufw allow 21027/udp   # Syncthing
+sudo ufw allow 8080/tcp    # qBittorrent
+sudo ufw allow 9090/tcp    # Cockpit
+sudo ufw enable
+
+# === ОЧИСТКА СИСТЕМЫ ПЕРЕД СОЗДАНИЕМ ISO ===
+echo "Очистка системы..."
+sudo apt clean
+sudo rm -rf /var/lib/apt/lists/*
+
+echo "Установка завершена! NAS готов к использованию."
